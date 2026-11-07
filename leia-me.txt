@@ -1,8 +1,0 @@
-Crescer+ 1.8.9 — versão experimental
-
-Correção: seleção OMS 2006 até 60 meses completos; OMS 2007 a partir de 61 meses completos, inclusive nas curvas.
-
-ATENÇÃO: a tabela OMS 2006 de IMC/idade incorporada termina no dia 1826, enquanto peso/idade e estatura/idade se estendem até o dia 1856. Para crianças com 60 meses completos e idade em dias maior que 1826, o IMC/idade poderá ser exibido como referência indisponível. O sistema não extrapola a tabela. A lacuna precisa ser resolvida com dados oficiais verificados antes do uso profissional.
-
-Use somente dados fictícios. Sem autenticação, sincronização ou backup.
-Publique index.html e oms-data.json juntos no Netlify.

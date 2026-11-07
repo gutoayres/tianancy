@@ -1,0 +1,148 @@
+
+const KEY='crescer_v1_',get=(k,d)=>{try{return JSON.parse(localStorage.getItem(KEY+k))??d}catch{return d}},put=(k,v)=>localStorage.setItem(KEY+k,JSON.stringify(v));let kids=get('kids',[]),evals=get('evals',[]),refs=null;let loaded=false;let editingChildId=null,editingEvalId=null;document.getElementById('data').value=new Date().toISOString().slice(0,10);
+function tab(id,btn){document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hidden',s.id!==id));document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');refresh()}
+function days(a,b){return Math.round((new Date(b+'T12:00:00Z')-new Date(a+'T12:00:00Z'))/86400000)}
+function completedMonths(dob,date){
+ const [y,m,d]=dob.split('-').map(Number),[ey,em,ed]=date.split('-').map(Number);
+ let n=(ey-y)*12+em-m;
+ const lastDay=new Date(Date.UTC(ey,em,0)).getUTCDate();
+ if(ed<Math.min(d,lastDay))n--;
+ return n;
+}
+function ageMonths(a,b){return days(a,b)/30.4375}
+function calendarMonthAge(dob,date){
+ const n=completedMonths(dob,date);
+ const [y,m,d]=dob.split('-').map(Number);
+ const anniversary=(offset)=>{const total=y*12+(m-1)+offset,yy=Math.floor(total/12),mm=total%12+1;return new Date(Date.UTC(yy,mm-1,Math.min(d,new Date(Date.UTC(yy,mm,0)).getUTCDate())))};
+ const current=anniversary(n),next=anniversary(n+1),target=new Date(date+'T00:00:00Z');
+ return n+(target-current)/(next-current);
+}
+function dateAtAgeDays(dob,age){const dt=new Date(dob+'T00:00:00Z');dt.setUTCDate(dt.getUTCDate()+Math.round(age));return dt.toISOString().slice(0,10)}
+function under24(dob,date){return days(dob,date)<731}
+function referenceYear(dob,date){return Math.floor(days(dob,date)/30.4375)<=60?'2006':'2007'}function fmt(n,d=2){return Number(n).toLocaleString('pt-BR',{maximumFractionDigits:d,minimumFractionDigits:d})}
+function addChild(){
+ const name=document.getElementById('nome').value.trim(),dob=document.getElementById('nasc').value,sex=document.getElementById('sexo').value,turma=document.getElementById('turma').value.trim();
+ if(!name||!/^\d{4}-\d{2}-\d{2}$/.test(dob)||dob>new Date().toISOString().slice(0,10)||!['F','M'].includes(sex))return alert('Preencha identificação, data de nascimento e sexo válidos.');
+ if(editingChildId){
+  const idx=kids.findIndex(x=>x.id===editingChildId);if(idx<0)return alert('Cadastro não encontrado.');
+  const old=kids[idx];
+  if((old.dob!==dob||old.sex!==sex)&&evals.some(e=>e.child===old.id)&&!confirm('Alterar nascimento ou sexo recalculará todo o histórico antropométrico dessa criança. Continuar?'))return;
+  kids[idx]={...old,name,dob,sex,turma};put('kids',kids);cancelChildEdit();
+ }else{kids.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),name,dob,sex,turma});put('kids',kids);document.getElementById('nome').value='';document.getElementById('turma').value='';document.getElementById('nasc').value=''}
+ refresh();
+}
+function editChild(id){const k=kids.find(k=>k.id===id);if(!k)return;editingChildId=id;for(const [field,value] of [['nome',k.name],['nasc',k.dob],['sexo',k.sex],['turma',k.turma||'']])document.getElementById(field).value=value;document.getElementById('childSave').textContent='Salvar alterações do cadastro';document.getElementById('childCancel').classList.remove('hidden');document.getElementById('nome').focus()}
+function cancelChildEdit(){editingChildId=null;document.getElementById('childSave').textContent='Cadastrar criança';document.getElementById('childCancel').classList.add('hidden');for(const id of ['nome','nasc','turma'])document.getElementById(id).value='';document.getElementById('sexo').value='F'}
+function deleteChild(id){const k=kids.find(x=>x.id===id);if(!k)return;const n=evals.filter(x=>x.child===id).length;if(!confirm('Excluir definitivamente o cadastro fictício "'+k.name+'" e '+n+' avaliação(ões)? Esta operação não pode ser desfeita sem um backup exportado.'))return;if(!confirm('Segunda confirmação: excluir permanentemente cadastro, avaliações e parecer?'))return;kids=kids.filter(x=>x.id!==id);evals=evals.filter(x=>x.child!==id);put('kids',kids);put('evals',evals);localStorage.removeItem(KEY+'parecer_'+id);if(editingChildId===id)cancelChildEdit();if(editingEvalId&&!evals.some(x=>x.id===editingEvalId))cancelEvalEdit();refresh()}
+
+function refresh(){document.getElementById('children').innerHTML=kids.length?kids.map(k=>`<p><b>${esc(k.name)}</b> · ${esc(k.turma||'Sem turma')} · ${k.dob} · ${k.sex==='F'?'Feminino':'Masculino'} <button class="secondary" onclick="editChild('${k.id}')">Editar</button> <button class="danger" onclick="deleteChild('${k.id}')">Excluir</button></p>`).join(''):'<p class="muted">Nenhuma criança cadastrada.</p>';['child','historyChild'].forEach(id=>{let el=document.getElementById(id),v=el.value;el.innerHTML=kids.map(k=>`<option value="${k.id}">${esc(k.name)}</option>`).join('');if(kids.some(k=>k.id===v))el.value=v});document.getElementById('refstatus').textContent=loaded?'Tabelas OMS 2006 e 2007 carregadas com sucesso.':'Referências ainda não carregadas.';renderHistory()}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function lms(ind,sex,age,year){if(!refs)return null;if(year==='2007'&&(age<60||age>= (ind==='weight'?121:229)))return null;const obj=refs[year]?.[ind]?.[sex];if(!obj)return null;const at=age-obj.start,lo=Math.floor(at),hi=Math.ceil(at);if(lo<0||hi>=obj.v.length)return null;const a=obj.v[lo],b=obj.v[hi],t=at-lo;return {L:a[0]+(b[0]-a[0])*t,M:a[1]+(b[1]-a[1])*t,S:a[2]+(b[2]-a[2])*t}}
+function rawZ(x,r){if(!r||x<=0||r.M<=0||r.S<=0)return null;return Math.abs(r.L)<1e-9?Math.log(x/r.M)/r.S:(Math.pow(x/r.M,r.L)-1)/(r.L*r.S)}
+function sd(r,z){return Math.abs(r.L)<1e-9?r.M*Math.exp(r.S*z):r.M*Math.pow(1+r.L*r.S*z,1/r.L)}
+function zscore(x,r,adjusted=true){let z=rawZ(x,r);if(z===null||!Number.isFinite(z))return null;if(!adjusted)return z;if(z>3){return 3+(x-sd(r,3))/(sd(r,3)-sd(r,2))}if(z< -3){return -3+(x-sd(r,-3))/(sd(r,-2)-sd(r,-3))}return z}
+function classify(ind,z,year){if(z===null||!Number.isFinite(z))return 'Referência indisponível';const limits=ind==='weight'?[-6,5]:ind==='height'?[-6,6]:[-5,5];if(z<limits[0]||z>limits[1])return 'Revisar medida — escore-Z biologicamente implausível';if(ind==='bmi'){if(z< -3)return 'Magreza acentuada';if(z< -2)return 'Magreza';if(year==='2006'){if(z>3)return 'Obesidade';if(z>2)return 'Sobrepeso';if(z>1)return 'Risco de sobrepeso';return 'Eutrofia'}if(z>2)return 'Obesidade';if(z>1)return 'Sobrepeso';return 'Eutrofia'}if(ind==='height'){if(z< -3)return 'Muito baixa estatura';if(z< -2)return 'Baixa estatura';if(z>3)return 'Estatura muito elevada para idade (conferir medida)';if(z>2)return 'Estatura elevada para idade (avaliar)';return 'Estatura adequada para idade'}if(z< -3)return 'Peso muito baixo para idade';if(z< -2)return 'Peso baixo para idade';if(z>2)return 'Peso elevado para idade (avaliar IMC)';return 'Peso adequado para idade (avaliar IMC)'}
+function percentile(z){let sign=z<0?-1:1,x=Math.abs(z)/Math.sqrt(2),t=1/(1+.3275911*x),erf=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-.284496736)*t+.254829592)*t*Math.exp(-x*x);return 50*(1+sign*erf)}
+function pctLabel(z){if(z===null||!Number.isFinite(z))return '—';const p=percentile(z);if(p<0.05)return '<0,1';if(p>99.95)return '>99,9';return fmt(p,1)}
+function reviewFlags(c){
+ const flags=[];
+ const definitions=[
+  {key:'weight',label:'Peso/idade',min:-6,max:5},
+  {key:'height',label:'Estatura/idade',min:-6,max:6},
+  {key:'bmi',label:'IMC/idade',min:-5,max:5}
+ ];
+ for(const item of definitions){
+  const z=c.zs[item.key];
+  if(z===null||!Number.isFinite(z)){
+   flags.push(item.label+' sem escore-Z disponível: conferir a faixa etária e a referência antes de interpretar.');
+   continue;
+  }
+  if(z<item.min||z>item.max){
+   flags.push(item.label+': escore-Z biologicamente implausível segundo limites de sinalização da OMS ('+item.min+' a +'+item.max+'). Conferir dados de nascimento, peso, estatura e posição de medição; não interpretar o resultado sem revisão.');
+  }else if(Math.abs(z)>3){
+   flags.push(item.label+': escore-Z extremo (além de ±3), porém dentro dos limites de plausibilidade da OMS. Conferir a medida e interpretar com avaliação profissional.');
+  }
+ }
+ return flags;
+}
+function compute(k,e){let ageDays=days(k.dob,e.date),months=ageDays/30.4375,year=referenceYear(k.dob,e.date);let height=e.height;if(under24(k.dob,e.date)&&e.position==='standing')height+=.7;if(!under24(k.dob,e.date)&&e.position==='recumbent')height-=.7;let bmi=e.weight/Math.pow(height/100,2),zs={};let age=year==='2006'?ageDays:months;for(let [ind,x] of [['bmi',bmi],['height',height],['weight',e.weight]]){zs[ind]=zscore(x,lms(ind,k.sex,age,year),year!=='2007'||ind!=='height')}return {months,bmi,height,zs,year,ageDays}}
+function measureAudit(k,e){
+ const months=days(k.dob,e.date)/30.4375;
+ const original=Number(e.rawHeight ?? e.height);
+ const position=e.position==='recumbent'?'Deitada (comprimento)':e.position==='standing'?'Em pé (estatura)':'Não registrada';
+ const adjustment=under24(k.dob,e.date)&&e.position==='standing'?0.7:!under24(k.dob,e.date)&&e.position==='recumbent'?-0.7:0;
+ return {position,original,adjustment,standardized:original+adjustment,corrected:adjustment!==0};
+}
+function signedAdjustment(v){return v===0?'0,0 cm (sem correção)':(v>0?'+':'')+fmt(v,1)+' cm'}
+function saveEval(){
+ if(!loaded)return alert('Aguarde o carregamento das referências OMS.');
+ const k=kids.find(x=>x.id===document.getElementById('child').value),date=document.getElementById('data').value,weight=Number(document.getElementById('peso').value),height=Number(document.getElementById('altura').value),position=document.getElementById('posicao').value;
+ if(!k)return alert('Cadastre uma criança.');
+ const age=date?completedMonths(k.dob,date):-1;
+ if(!date||age<12||age>=84||date>new Date().toISOString().slice(0,10)||!(weight>=2&&weight<=100)||!(height>=45&&height<=160)||!['standing','recumbent'].includes(position))return alert('Confira a data, a faixa etária de 1 a 6 anos e as medidas.');
+ const priorEntry=editingEvalId?evals.find(x=>x.id===editingEvalId):null;
+ if(editingEvalId&&!priorEntry)return alert('Avaliação para edição não encontrada.');
+ if(evals.some(x=>x.child===k.id&&x.date===date&&x.id!==editingEvalId))return alert('Já existe uma avaliação para esta criança nesta data. Edite o registro existente em Histórico e gráficos.');
+ if((under24(k.dob,date)&&position==='standing')||(!under24(k.dob,date)&&position==='recumbent')){if(!confirm('A posição de medição difere da recomendação para esta idade. O sistema aplicará correção de 0,7 cm. Confirmar?'))return}
+ const e={id:priorEntry?.id||Date.now().toString(36)+Math.random().toString(36).slice(2,6),child:k.id,date,weight,height,position},c=compute(k,e);
+ const previous=evals.filter(x=>x.child===k.id&&x.date<date&&x.id!==editingEvalId).sort((a,b)=>b.date.localeCompare(a.date))[0];
+ const alerts=reviewFlags(c);if(previous){const prior=compute(k,previous);if(c.height<prior.height-0.1)alerts.push('Medida padronizada inferior à avaliação anterior: conferir aferição e posição de medição.')}
+ if(alerts.length&&!confirm('Atenção: revisão recomendada antes de salvar.\n\n'+alerts.join('\n')+'\n\nDeseja salvar esta avaliação fictícia?'))return;
+ if(priorEntry){if(!confirm('Substituir os dados desta avaliação? Os escores-Z e os gráficos serão recalculados.'))return;evals=evals.map(x=>x.id===editingEvalId?e:x)}else evals.push(e);
+ put('evals',evals);const wasEdit=!!editingEvalId;cancelEvalEdit();
+ const audit=measureAudit(k,e),zline=Object.entries(c.zs).map(([i,z])=>`${{bmi:'IMC/idade',height:'Estatura/idade',weight:'Peso/idade'}[i]}: ${z===null?'referência indisponível':`Z = ${fmt(z)} · percentil ≈ ${pctLabel(z)} · ${classify(i,z,c.year)}`}`).join('<br>');
+ document.getElementById('output').innerHTML=`<div class="result"><b>${wasEdit?'Avaliação atualizada':'Avaliação salva'}</b><p>Idade: ${fmt(c.months,1)} meses · IMC: <span class="metric">${fmt(c.bmi)}</span> kg/m²</p><p class="small"><b>Rastreabilidade:</b> ${esc(audit.position)} · medida original ${fmt(audit.original,1)} cm · ajuste ${signedAdjustment(audit.adjustment)} · padronizada ${fmt(audit.standardized,1)} cm</p>${zline}${alerts.length?`<p class="notice"><b>Revisão recomendada:</b> ${alerts.map(esc).join(' ')}</p>`:''}<p class="small">Referência OMS ${c.year}. Classificação de triagem, sujeita a avaliação profissional.</p></div>`;
+ refresh();
+}
+function editEval(id){const e=evals.find(x=>x.id===id);if(!e)return;editingEvalId=id;document.getElementById('child').value=e.child;document.getElementById('child').disabled=true;for(const [field,value] of [['data',e.date],['peso',e.weight],['altura',e.height],['posicao',e.position]])document.getElementById(field).value=value;document.getElementById('evalSave').textContent='Salvar correção da avaliação';document.getElementById('evalCancel').classList.remove('hidden');const nav=document.querySelector('nav button[onclick*="avaliacao"]');tab('avaliacao',nav)}
+function cancelEvalEdit(){editingEvalId=null;document.getElementById('child').disabled=false;document.getElementById('evalSave').textContent='Salvar avaliação e calcular';document.getElementById('evalCancel').classList.add('hidden')}
+function exportBackup(){const backup={format:'crescer-backup-v1',version:'1.9.0',exportedAt:new Date().toISOString(),kids,evals,pareceres:Object.fromEntries(kids.map(k=>[k.id,get('parecer_'+k.id,'')]))};const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='crescer-backup-ficticio-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(u)}
+async function importBackup(event){const file=event.target.files?.[0];if(!file)return;try{const obj=JSON.parse(await file.text());if(obj.format!=='crescer-backup-v1'||!Array.isArray(obj.kids)||!Array.isArray(obj.evals))throw Error('Formato de backup inválido');const ids=new Set(obj.kids.map(k=>k.id));if(ids.size!==obj.kids.length||obj.kids.some(k=>!k.id||typeof k.name!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(k.dob)||!['F','M'].includes(k.sex))||obj.evals.some(e=>!ids.has(e.child)||!e.id||!/^\d{4}-\d{2}-\d{2}$/.test(e.date)||!Number.isFinite(e.weight)||!Number.isFinite(e.height)||!['standing','recumbent'].includes(e.position)))throw Error('Estrutura dos dados inválida');const unique=new Set(obj.evals.map(e=>e.child+'|'+e.date));if(unique.size!==obj.evals.length||new Set(obj.evals.map(e=>e.id)).size!==obj.evals.length)throw Error('Backup contém registros duplicados');if(!confirm('Restaurar backup? Todos os cadastros e avaliações locais atuais serão SUBSTITUÍDOS. Exporte uma cópia antes de continuar.'))return;if(!confirm('Confirmar substituição permanente dos dados locais pelos dados do arquivo?'))return;const currentPareceres=kids.map(k=>k.id);kids=obj.kids;evals=obj.evals;put('kids',kids);put('evals',evals);for(const id of currentPareceres)localStorage.removeItem(KEY+'parecer_'+id);for(const k of kids)put('parecer_'+k.id,typeof obj.pareceres?.[k.id]==='string'?obj.pareceres[k.id]:'');cancelChildEdit();cancelEvalEdit();refresh();alert('Backup restaurado. Confira os dados fictícios.') }catch(err){alert('Não foi possível restaurar: '+err.message)}finally{event.target.value=''}}
+
+function chart(arr,key,title){if(!arr.length)return '';let vals=arr.map(v=>v[key]).filter(Number.isFinite);if(!vals.length)return '';let isZ=key.startsWith('z'),lo=isZ?Math.min(-3,...vals):Math.min(...vals),hi=isZ?Math.max(3,...vals):Math.max(...vals),pad=isZ?.35:Math.max((hi-lo)*.2,.3);lo-=pad;hi+=pad;let W=680,H=235,left=55,right=18,top=22,bottom=55;let dates=arr.map(v=>new Date(v.date+'T12:00:00Z').getTime()),dmin=Math.min(...dates),dmax=Math.max(...dates);let xp=i=>left+(dmax===dmin?.5:(dates[i]-dmin)/(dmax-dmin))*(W-left-right),yp=v=>top+(hi-v)/(hi-lo)*(H-top-bottom);let poly=arr.map((v,i)=>Number.isFinite(v[key])?`${xp(i)},${yp(v[key])}`:null).filter(Boolean).join(' ');let bands=isZ?[-3,-2,-1,0,1,2,3].map(z=>`<line x1="${left}" y1="${yp(z)}" x2="${W-right}" y2="${yp(z)}" stroke="${z===0?'#68858b':'#cbdde0'}" stroke-dasharray="4 4"/><text x="${left-8}" y="${yp(z)+4}" text-anchor="end" font-size="11">${z>0?'+':''}${z}</text>`).join(''):'';let showEvery=Math.max(1,Math.ceil(arr.length/7));return `<h3>${title}</h3><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico ${title}"><line x1="${left}" y1="${top}" x2="${left}" y2="${H-bottom}" stroke="#a4b7c0"/><line x1="${left}" y1="${H-bottom}" x2="${W-right}" y2="${H-bottom}" stroke="#a4b7c0"/>${bands}${isZ?'':`<text x="4" y="${top+5}" font-size="12">${fmt(hi,1)}</text><text x="4" y="${H-bottom}" font-size="12">${fmt(lo,1)}</text>`}<polyline fill="none" stroke="#147c84" stroke-width="3" points="${poly}"/>${arr.map((v,i)=>Number.isFinite(v[key])?`<circle cx="${xp(i)}" cy="${yp(v[key])}" r="4" fill="#147c84"/>${(i%showEvery===0||i===arr.length-1)?`<text x="${xp(i)}" y="${H-23+(i%2)*13}" text-anchor="middle" font-size="10">${v.date.slice(8,10)}/${v.date.slice(5,7)}/${v.date.slice(2,4)}</text>`:''}`:'').join('')}</svg>${isZ?'<p class="small muted">Linhas de referência de escore-Z (−3 a +3); não substituem curvas antropométricas completas da OMS.</p>':''}`}
+function whoChart(k,arr,ind,title){
+ if(!arr.length||!refs)return '';
+ const W=720,H=270,L=57,R=20,T=24,B=49;
+ const pts=arr.map(e=>({date:e.date,age:days(k.dob,e.date),value:ind==='weight'?e.weight:ind==='height'?e.height:e.bmi}));
+ let amax=Math.max(...pts.map(x=>x.age));
+ let amin=Math.max(0,amax-365.25);
+ if(amax-amin<365){amax=amin+365.25}
+ const steps=90, curves=[-3,-2,-1,0,1,2,3], all=[];
+ const refsAt=(age,z)=>{const months=age/30.4375,yr=Math.floor(months)<=60?'2006':'2007',a=yr==='2006'?age:months;const lm=lms(ind,k.sex,a,yr);return lm?sd(lm,z):null};
+ for(let j=0;j<=steps;j++){const a=amin+(amax-amin)*j/steps;for(const z of curves){let v=refsAt(a,z);if(Number.isFinite(v))all.push(v)}}
+ all.push(...pts.map(p=>p.value));if(!all.length)return '';
+ let lo=Math.min(...all),hi=Math.max(...all),pad=Math.max((hi-lo)*.06,.1);lo-=pad;hi+=pad;
+ const X=a=>L+(a-amin)/(amax-amin)*(W-L-R),Y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
+ const paths=curves.map(z=>{let segments=[],current=[];for(let j=0;j<=steps;j++){let a=amin+(amax-amin)*j/steps,v=refsAt(a,z);if(Number.isFinite(v)){current.push(`${X(a).toFixed(1)},${Y(v).toFixed(1)}`)}else if(current.length){segments.push(current);current=[]}}if(current.length)segments.push(current);return segments.map(a=>`<polyline fill="none" stroke="${z===0?'#16747c':'#b3cbd0'}" stroke-width="${z===0?2.3:1.1}" stroke-dasharray="${Math.abs(z)===3?'5 4':'none'}" points="${a.join(' ')}"/>`).join('')}).join('');
+ const dots=pts.filter(p=>p.age>=amin&&p.age<=amax).map(p=>`<circle cx="${X(p.age)}" cy="${Y(p.value)}" r="4.3" fill="#b04438" stroke="white" stroke-width="1.4"/>`).join('');
+ const ageLabels=[0,.25,.5,.75,1].map(t=>{let a=amin+(amax-amin)*t;return `<text x="${X(a)}" y="${H-14}" text-anchor="middle" font-size="10">${fmt(a/30.4375,1)} m</text>`}).join('');
+ const zLabels=curves.map(z=>{let v=refsAt(amax,z);return Number.isFinite(v)?`<text x="${W-R+2}" y="${Y(v)+3}" font-size="9">${z>0?'+':''}${z}</text>`:''}).join('');
+ return `<div class="chart-wrap"><h3>${title} — referência OMS</h3><svg viewBox="0 0 ${W} ${H}" aria-label="${title}, curvas de escore-Z da OMS"><line x1="${L}" y1="${T}" x2="${L}" y2="${H-B}" stroke="#829ba5"/><line x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}" stroke="#829ba5"/>${paths}${dots}${zLabels}${ageLabels}<text x="4" y="${T+7}" font-size="11">${fmt(hi,1)}</text><text x="4" y="${H-B}" font-size="11">${fmt(lo,1)}</text></svg><p class="small muted">Linhas: Z −3 a +3 (mediana em destaque); pontos vermelhos: avaliações fictícias. Janela de 12 meses encerrada na última avaliação; idade em meses. Referência ${ind==='weight'?'peso/idade':ind==='height'?'estatura/idade':'IMC/idade'}.</p></div>`;
+}
+function renderHistory(){let k=kids.find(k=>k.id===document.getElementById('historyChild').value),el=document.getElementById('hist');if(!k){el.innerHTML='<p class="muted">Cadastre uma criança.</p>';return}let es=evals.filter(e=>e.child===k.id).sort((a,b)=>a.date.localeCompare(b.date)),data=es.map(e=>({...e,rawHeight:e.height,...compute(k,e),zBmi:compute(k,e).zs.bmi,zHeight:compute(k,e).zs.height}));loadParecer();el.innerHTML=es.length?`<div class="history"><table><thead><tr><th>Data</th><th>Idade</th><th>Peso</th><th>Medida original</th><th>Posição</th><th>Ajuste</th><th>Padronizada</th><th>IMC</th><th>IMC Z</th><th>Classificação IMC</th><th></th></tr></thead><tbody>${data.map(e=>`<tr><td>${e.date}</td><td>${fmt(e.months,1)} m</td><td>${fmt(e.weight)} kg</td><td>${fmt(e.rawHeight,1)} cm</td><td>${esc(measureAudit(k,e).position)}</td><td>${signedAdjustment(measureAudit(k,e).adjustment)}</td><td>${fmt(measureAudit(k,e).standardized,1)} cm</td><td>${fmt(e.bmi)}</td><td>${e.zBmi===null?'—':fmt(e.zBmi)}</td><td>${classify('bmi',e.zBmi,e.year)}</td><td><button class="secondary" onclick="editEval('${e.id}')">Editar</button> <button class="danger" onclick="delEval('${e.id}')">Excluir</button></td></tr>`).join('')}</tbody></table></div>${chart(data,'weight','Peso (kg)')}${chart(data,'height','Altura medida (cm)')}${chart(data,'bmi','IMC (kg/m²)')}${chart(data,'zBmi','Escore-Z IMC/idade (se disponível)')}${chart(data,'zHeight','Escore-Z estatura/idade (se disponível)')}${whoChart(k,data,'weight','Peso/idade')}${whoChart(k,data,'height','Estatura/idade')}${whoChart(k,data,'bmi','IMC/idade')}`:'<p class="muted">Nenhuma avaliação registrada.</p>'}
+function delEval(id){if(!confirm('Excluir esta avaliação?'))return;evals=evals.filter(e=>e.id!==id);put('evals',evals);if(editingEvalId===id)cancelEvalEdit();renderHistory()}
+
+const PARECER_SUGESTOES={adequado:'Os dados antropométricos apresentados devem ser interpretados em conjunto com a avaliação nutricional, o histórico de crescimento e o contexto da criança. Recomenda-se manter o acompanhamento periódico.',reavaliar:'Recomenda-se conferir a técnica de aferição, registrar as medidas de forma padronizada e acompanhar a evolução nas próximas avaliações. A interpretação depende da avaliação individual.',familia:'Orientar a família quanto à oferta variada de alimentos adequados à idade, à rotina alimentar e ao acompanhamento periódico do crescimento, conforme avaliação individual.'};
+function selectedChild(){return kids.find(k=>k.id===document.getElementById('historyChild').value)}
+function loadParecer(){const k=selectedChild();document.getElementById('parecerTexto').value=k?get('parecer_'+k.id,''):'';document.getElementById('parecerSugestao').value=''}
+function saveParecer(){const k=selectedChild();if(k)put('parecer_'+k.id,document.getElementById('parecerTexto').value)}
+function applySuggestion(){const id=document.getElementById('parecerSugestao').value;if(!id)return;const ta=document.getElementById('parecerTexto');if(ta.value.trim()&&!confirm('Substituir o parecer atual pela sugestão?')){document.getElementById('parecerSugestao').value='';return}ta.value=PARECER_SUGESTOES[id];saveParecer()}
+function printReport(){
+ if(!loaded)return alert('As referências OMS não foram carregadas.');
+ const k=kids.find(x=>x.id===document.getElementById('historyChild').value);
+ if(!k)return alert('Selecione uma criança.');
+ const es=evals.filter(e=>e.child===k.id).sort((a,b)=>a.date.localeCompare(b.date));
+ if(!es.length)return alert('Esta criança não possui avaliações.');
+ const ds=es.map(e=>{const c=compute(k,e);return {...e,rawHeight:e.height,...c,zBmi:c.zs.bmi,zHeight:c.zs.height}});
+ const labels={bmi:'IMC/idade',height:'Estatura/idade',weight:'Peso/idade'};
+ const rows=ds.map(e=>`<tr><td>${esc(e.date.split('-').reverse().join('/'))}</td><td>${fmt(e.months,1)}</td><td>${fmt(e.weight,2)}</td><td>${fmt(e.rawHeight,1)}</td><td>${esc(measureAudit(k,e).position)}</td><td>${signedAdjustment(measureAudit(k,e).adjustment)}</td><td>${fmt(measureAudit(k,e).standardized,1)}</td><td>${fmt(e.bmi,2)}</td><td>${e.zs.bmi===null?'—':fmt(e.zs.bmi,2)}</td><td>${esc(classify('bmi',e.zs.bmi,e.year))}</td></tr>`).join('');
+ const latest=ds[ds.length-1];const latestAudit=measureAudit(k,latest);
+ const indicators=['weight','height','bmi'].map(i=>{let z=latest.zs[i];return `<tr><td>${labels[i]}</td><td>${z===null?'—':fmt(z,2)}</td><td>${pctLabel(z)}</td><td>${esc(classify(i,z,latest.year))}</td></tr>`}).join('');
+ const charts=[['weight','Peso/idade'],['height','Estatura/idade'],['bmi','IMC/idade']].map(([key,title])=>whoChart(k,ds,key,title)).join('');
+ const review=reviewFlags(latest);for(let i=1;i<ds.length;i++){if(ds[i].height<ds[i-1].height-0.1){review.push('Histórico com redução de comprimento/estatura padronizada: revisar registros.');break}}const reviewHtml=review.length?`<p class="notice"><b>Atenção à qualidade das medidas:</b> ${esc(review.join(' '))}</p>`:'';
+ const parecer=esc(document.getElementById('parecerTexto').value.trim()||'Não preenchido.');
+ document.getElementById('reportArea').innerHTML=`<div class="report-page"><div class="page-label">Página 1 de 2 · Versão experimental 1.9.0</div><div class="report-header"><h1>Crescer+ | Relatório de acompanhamento</h1><p><strong>Identificador:</strong> ${esc(k.name)} &nbsp; <strong>Turma:</strong> ${esc(k.turma||'—')}</p><p><strong>Nascimento:</strong> ${esc(k.dob.split('-').reverse().join('/'))} &nbsp; <strong>Sexo da referência OMS:</strong> ${k.sex==='F'?'Feminino':'Masculino'} <button class="secondary" onclick="editChild('${k.id}')">Editar</button> <button class="danger" onclick="deleteChild('${k.id}')">Excluir</button></p></div><h2>Última avaliação — ${esc(latest.date.split('-').reverse().join('/'))}</h2><p>Idade: ${fmt(latest.months,1)} meses | Peso: ${fmt(latest.weight,2)} kg | Medida padronizada: ${fmt(latest.height,1)} cm | IMC calculado: ${fmt(latest.bmi,2)} kg/m²</p><p><strong>Rastreabilidade da medição:</strong> ${esc(latestAudit.position)} | Original: ${fmt(latestAudit.original,1)} cm | Ajuste: ${signedAdjustment(latestAudit.adjustment)} | Padronizada: ${fmt(latestAudit.standardized,1)} cm</p><table><thead><tr><th>Indicador</th><th>Escore-Z</th><th>Percentil aproximado*</th><th>Classificação de triagem</th></tr></thead><tbody>${indicators}</tbody></table>${reviewHtml}${latest.year==='2006'&&latest.ageDays>1856&&latest.zs.bmi===null?'<p><strong>Atenção:</strong> IMC/idade indisponível para esta idade: a série OMS 2006 incorporada termina em 1.856 dias. Não foi realizada extrapolação; não interpretar como eutrofia.</p>':''}<h2>Histórico de avaliações</h2><table><thead><tr><th>Data</th><th>Idade (meses)</th><th>Peso (kg)</th><th>Original (cm)</th><th>Posição</th><th>Ajuste</th><th>Final (cm)</th><th>IMC</th><th>Z IMC</th><th>Classificação</th></tr></thead><tbody>${rows}</tbody></table><h2>Parecer e orientações da nutricionista</h2><div class="parecer-print">${parecer}</div><div class="report-footer"><p><strong>Responsável técnico:</strong> __________________________________ &nbsp; <strong>Data:</strong> ____/____/______</p><p class="footnote">Relatório experimental, exclusivamente para testes com dados fictícios. *Percentis extremos exibidos como limites aproximados. Sugestões de parecer não constituem diagnóstico. Valores e classificações exigem comparação com WHO Anthro/AnthroPlus antes do uso profissional.</p></div></div><div class="report-page"><div class="page-label">Página 2 de 2 · Referências OMS</div><h1>Crescer+ | Curvas de crescimento</h1><p>Identificador: ${esc(k.name)} · Janela de 12 meses encerrada na última avaliação (${esc(latest.date.split('-').reverse().join('/'))}).</p>${charts}<p class="footnote">Referências LMS: OMS 2006 (até 60 meses completos por dias/30,4375) e OMS 2007 (a partir de 61 meses pelo mesmo critério). Linhas Z −3 a +3 e pontos das avaliações fictícias. Interpolação e cálculos ainda requerem comparação com ferramentas oficiais. Dados armazenados localmente, sem autenticação ou backup.</p></div>`;
+ window.print();
+}
+
+async function init(){try{const response=await fetch('./oms-data.json',{cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status);refs=await response.json();loaded=true;document.getElementById('refstatus').textContent='Referências OMS 2006/2007 carregadas';refresh()}catch(err){loaded=false;document.getElementById('refstatus').textContent='Falha ao carregar tabelas OMS: '+err.message;alert('Não foi possível carregar as tabelas OMS. Verifique a publicação do arquivo oms-data.json.')}}refresh();init();

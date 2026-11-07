@@ -1,0 +1,1 @@
+Crescer+ 1.9.0 experimental - apenas dados fictícios. Extraia todos os arquivos e publique-os juntos no Netlify. Edição de crianças e avaliações, exclusões com dupla confirmação para crianças, backup JSON manual. Não há autenticação, criptografia nem sincronização.
